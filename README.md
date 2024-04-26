@@ -21,3 +21,21 @@ Nesta pasta, você encontrará todos os códigos fontes relacionados à implemen
 A pasta docs contém toda a documentação do projeto, incluindo manuais de usuário, especificações técnicas, e quaisquer outros documentos relevantes para entender e utilizar o Yaya Score.
 
 Este repositório é o ponto central para todo o desenvolvimento e acompanhamento do projeto Yaya Score. Se você tiver alguma dúvida ou sugestão, sinta-se à vontade para contribuir ou entrar em contato com a equipe de desenvolvimento.
+
+## Project setup for Vue.js
+```
+npm install
+```
+
+### Compiles and hot-reloads for development
+```
+npm run serve
+```
+
+### Compiles and minifies for production
+```
+npm run build
+```
+
+### Customize configuration
+See [Configuration Reference](https://cli.vuejs.org/config/).

@@ -28,12 +28,13 @@ contract Score {
         uint amount;
         uint interestRate;
         bool repaid;
+        bool defaulted; 
         uint amountRepaid;
     }
 
     struct LoanInfo {
-    uint id;
-    string status;
+        uint id;
+        string status;
     }
 
     mapping(address => uint) public scores;
@@ -56,6 +57,7 @@ contract Score {
     event LoanFulfilled(uint loanId, address indexed borrower, address indexed lender, uint amount, uint interestRate);
     event LoanRepaid(uint loanId, address indexed borrower, address indexed lender, uint amount);
     event LoanDefaulted(uint loanId, address indexed borrower, address indexed lender, uint amount);
+    event LoanFullyPaid(uint loanId, address indexed borrower, address indexed lender, uint amount);
 
     constructor() payable {
         reserveFund += msg.value; // Inicializa o fundo de reserva com o valor enviado no deploy
@@ -133,6 +135,7 @@ contract Score {
         require(msg.sender == loanRequests[requestId].borrower || msg.sender == address(this), "Only the borrower or the contract can finalize the loan request");
         LoanRequest storage request = loanRequests[requestId];
         require(!request.fulfilled, "Loan request already fulfilled");
+        require(!request.cancelled, "Cannot finalize a cancelled loan request");
 
         LoanOffer memory bestOffer;
         uint bestOfferIndex;
@@ -164,6 +167,7 @@ contract Score {
             amount: request.amount,
             interestRate: bestOffer.interestRate,
             repaid: false,
+            defaulted: false, // Inicializa como não inadimplente
             amountRepaid: 0
         });
 
@@ -186,12 +190,11 @@ contract Score {
     function withdrawPendingReturns() public {
         uint amount = pendingReturns[msg.sender];
         require(amount > 0, "No pending returns");
-        
+
         pendingReturns[msg.sender] = 0;
         payable(msg.sender).transfer(amount);
     }
 
-   // Função para pagar de volta o empréstimo
     function repayLoan(uint loanId) public payable {
         Loan storage loan = activeLoans[loanId];
         require(loan.borrower == msg.sender, "Only borrower can repay loan");
@@ -215,6 +218,10 @@ contract Score {
             loan.repaid = true;
             // Atualiza o score do tomador positivamente
             scores[msg.sender] = calculateScoreIncrement(loan.amount, loanCounts[msg.sender], (totalRepaid[msg.sender] * 100) / totalBorrowed[msg.sender], scores[msg.sender], alpha);
+            emit LoanFullyPaid(loanId, loan.borrower, loan.lender, msg.value);
+        } else {
+            // Marca como inadimplente se o valor total não for pago
+            emit LoanDefaulted(loanId, loan.borrower, loan.lender, msg.value);
         }
 
         payable(loan.lender).transfer(amountAfterFee);
@@ -227,12 +234,13 @@ contract Score {
         require(msg.sender == activeLoans[loanId].borrower || msg.sender == address(this), "Only the borrower or the contract can mark the loan as defaulted");
         Loan storage loan = activeLoans[loanId];
         require(!loan.repaid, "Loan already repaid");
+        require(!loan.defaulted, "Loan already marked as defaulted");
 
         uint amountRemaining = loan.amount - loan.amountRepaid;
 
         require(reserveFund >= amountRemaining, "Insufficient reserve fund");
 
-        loan.repaid = true;
+        loan.defaulted = true; // Marcar como inadimplente
         reserveFund -= amountRemaining;
         payable(loan.lender).transfer(amountRemaining);
 
@@ -368,27 +376,27 @@ contract Score {
     event LogPendingLoanRequest(uint indexed requestId);
 
     function getPendingLoanRequests() public view returns (uint[] memory) 
-{
-    require(loanRequestCounter > 0, "No loan requests exist");
+    {
+        require(loanRequestCounter > 0, "No loan requests exist");
 
-    uint pendingCount = 0;
-    for (uint i = 1; i <= loanRequestCounter; i++) {
-        if (!loanRequests[i].fulfilled && !loanRequests[i].cancelled) {
-            pendingCount++;
+        uint pendingCount = 0;
+        for (uint i = 1; i <= loanRequestCounter; i++) {
+            if (!loanRequests[i].fulfilled && !loanRequests[i].cancelled) {
+                pendingCount++;
+            }
         }
-    }
 
-    uint[] memory pendingRequests = new uint[](pendingCount);
-    uint index = 0;
-    for (uint i = 1; i <= loanRequestCounter; i++) {
-        if (!loanRequests[i].fulfilled && !loanRequests[i].cancelled) {
-            pendingRequests[index] = i;
-            index++;
+        uint[] memory pendingRequests = new uint[](pendingCount);
+        uint index = 0;
+        for (uint i = 1; i <= loanRequestCounter; i++) {
+            if (!loanRequests[i].fulfilled && !loanRequests[i].cancelled) {
+                pendingRequests[index] = i;
+                index++;
+            }
         }
-    }
 
-    return pendingRequests;
-}
+        return pendingRequests;
+    }
 
     // Função para obter detalhes de um pedido de empréstimo
     function getLoanRequestDetails(uint requestId) public view returns (
@@ -430,6 +438,8 @@ contract Score {
                     status = "cancelado";
                 } else if (loanRequests[i].fulfilled && activeLoans[i].repaid) {
                     status = "pago";
+                } else if (loanRequests[i].fulfilled && activeLoans[i].defaulted) {
+                    status = "inadimplente";
                 } else if (loanRequests[i].fulfilled && !activeLoans[i].repaid) {
                     status = "ativo";
                 } else {
@@ -501,6 +511,49 @@ contract Score {
     // Função para obter o saldo do contrato
     function getContractBalance() public view returns (uint) {
         return address(this).balance;
+    }
+
+    // Função para obter ofertas de empréstimo feitas por um usuário
+    function getOffersByUser(address user) public view returns (LoanInfo[] memory) {
+        uint offerCount = 0;
+
+        // Primeiro, conta o número de ofertas do usuário para alocar a matriz de tamanho correto
+        for (uint i = 1; i <= loanRequestCounter; i++) {
+            for (uint j = 0; j < loanOffers[i].length; j++) {
+                if (loanOffers[i][j].lender == user) {
+                    offerCount++;
+                }
+            }
+        }
+
+        LoanInfo[] memory offers = new LoanInfo[](offerCount);
+        uint index = 0;
+
+        // Preenche a matriz com os IDs dos empréstimos do usuário e seus status
+        for (uint i = 1; i <= loanRequestCounter; i++) {
+            for (uint j = 0; j < loanOffers[i].length; j++) {
+                if (loanOffers[i][j].lender == user) {
+                    string memory status;
+                    if (loanRequests[i].cancelled) {
+                        status = "cancelado";
+                    } else if (loanOffers[i][j].accepted && activeLoans[i].repaid) {
+                        status = "pago";
+                    } else if (loanOffers[i][j].accepted && !activeLoans[i].repaid && !activeLoans[i].defaulted) {
+                        status = "ativo";
+                    } else if (loanOffers[i][j].accepted && activeLoans[i].defaulted) {
+                        status = "inadimplente";
+                    } else if (!loanOffers[i][j].accepted && loanRequests[i].fulfilled) {
+                        status = "leiloado-nao-ganho";
+                    } else {
+                        status = "leiloando";
+                    }
+                    offers[index] = LoanInfo(i, status);
+                    index++;
+                }
+            }
+        }
+
+        return offers;
     }
 }
 

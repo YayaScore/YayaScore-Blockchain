@@ -1,4 +1,4 @@
-import { Web3 } from 'web3';
+import Web3 from 'web3';
 import fs from 'fs';
 import path from 'path';
 import readlineSync from 'readline-sync';
@@ -9,23 +9,14 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-console.log(__dirname);
-
 // Configuração da conexão com o nó Ethereum
 const web3 = new Web3(Web3.givenProvider || 'http://localhost:7545'); // Altere para o seu nó Ethereum
 
 // Endereço do contrato implantado
-const contractAddress = '0x37118e6B4Ed2F7b94047e6781e5083E7286Ba833';
+const contractAddress = '0x1F2170cC85b84bb2B52688EdCcd226148D530459';
 
 // Leitura do ABI do contrato
-const contractPath = path.resolve(__dirname, '../outputs/Score.json');
-
-// Lê o conteúdo do arquivo JSON
-const contractJson = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
-
-// Extrai o ABI do contrato
-const contractName = 'Score.sol:Score'; // Ajuste conforme necessário
-const contractABI = contractJson.contracts[contractName].abi;
+const contractABI = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../build/contracts/Score.json'), 'utf8')).abi;
 
 // Criação da instância do contrato
 const contract = new web3.eth.Contract(contractABI, contractAddress);
@@ -217,6 +208,34 @@ async function getContractBalance() {
     }
 }
 
+// Função para obter ofertas feitas por um usuário
+async function getOffersByUser(address) {
+    try {
+        const offers = await contract.methods.getOffersByUser(address).call();
+        return offers;
+    } catch (error) {
+        console.error('Erro ao obter ofertas do usuário:', error);
+        return [];
+    }
+}
+
+async function getOfferDetails(offerId) {
+    try {
+        const details = await contract.methods.getLoanRequestDetails(offerId).call();
+        const offers = await contract.methods.getLoanOffers(offerId).call();
+        const amountRepaid = await contract.methods.getAmountPaid(offerId).call();
+        const remainingAmount = await contract.methods.getRemainingAmount(offerId).call();
+
+        details.amountRepaid = amountRepaid; // Adiciona amountRepaid aos detalhes
+        details.remainingAmount = remainingAmount; // Adiciona remainingAmount aos detalhes
+
+        return { details, offers };
+    } catch (error) {
+        console.error('Erro ao obter detalhes da oferta:', error);
+        return { details: null, offers: null };
+    }
+}
+
 // Função interativa
 async function interactive() {
     while (true) {
@@ -232,7 +251,8 @@ async function interactive() {
             8) Cancel Loan
             9) List Loans by User
             10) See Contracts Balance
-            11) Exit
+            11) See Offers by User
+            12) Exit
             `);
             
             const choice = readlineSync.questionInt('Escolha uma opção: ');
@@ -513,15 +533,77 @@ if (loanChoice > 0 && loanChoice <= pendingLoans.length) {
         }
     }
 } 
-else if (choice === 10) {
-    const balance = await getContractBalance();
-    if (balance !== null) {
-        console.log(`Saldo do contrato: ${web3.utils.fromWei(balance, 'ether')} ETH`);
+else if (choice === 11) {
+    const offers = await getOffersByUser(userAddress);
+    if (offers.length === 0) {
+        console.log('Não há ofertas feitas por este usuário.');
+        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+        continue;
     }
-    readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+
+    while (true) {
+        console.log('\nOfertas:');
+        offers.forEach((offer, index) => {
+            console.log(`${index + 1}) Oferta ID: ${offer.id} (Status: ${offer.status})`);
+        });
+
+        console.log('\nOpções:');
+        console.log('0) Voltar para a tela inicial');
+        console.log('Escolha o número da oferta para ver os detalhes:');
+
+        const offerChoice = readlineSync.questionInt('Escolha uma opção: ');
+
+        if (offerChoice === 0) {
+            break;
+        } else if (offerChoice > 0 && offerChoice <= offers.length) {
+            const offerId = offers[offerChoice - 1].id;
+            const { details, offers: offerList } = await getOfferDetails(offerId);
+
+            if (offerList) {
+                offerList.forEach(async (offerDetail, index) => {
+                    if (offerDetail.lender === userAddress) {
+                        if (offers[offerChoice - 1].status === "pago" || offers[offerChoice - 1].status === "ativo") {
+                            console.log(`
+Detalhes da Oferta:
+- Tomador: ${details.borrower}
+- Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
+- Juros: ${offerDetail.interestRate}%
+`);
+                        } else if (offers[offerChoice - 1].status === "leiloado-nao-ganho") {
+                            console.log(`
+Detalhes da Oferta:
+- Tomador: ${details.borrower}
+- Valor Pedido: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
+- Juros Ofertado: ${offerDetail.interestRate}%
+`);
+                        } else if (offers[offerChoice - 1].status === "inadimplente") {
+                            const amountPaid = await getAmountPaid(offerId);
+                            const remainingAmount = await getRemainingAmount(offerId);
+                            console.log(`
+Detalhes da Oferta:
+- Tomador: ${details.borrower}
+- Valor Pedido: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
+- Juros Ofertado: ${offerDetail.interestRate}%
+- Valor Pago: ${web3.utils.fromWei(amountPaid.toString(), 'ether')} ETH
+- Valor Faltando: ${web3.utils.fromWei(remainingAmount.toString(), 'ether')} ETH
+`);
+                        }
+                    }
+                });
+            }
+
+            console.log('\nOpções:');
+            console.log('1) Voltar para a lista de ofertas');
+            console.log('2) Voltar para a tela inicial');
+            const subChoice = readlineSync.questionInt('Escolha uma opção: ');
+            if (subChoice === 2) break;
+        } else {
+            console.log('Escolha inválida.');
+        }
+    }
 }
 
-else if (choice === 11) {
+else if (choice === 12) {
     break;
 } else {
     console.log('Opção não reconhecida.');

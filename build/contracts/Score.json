@@ -46053,12 +46053,12 @@
     "5777": {
       "events": {},
       "links": {},
-      "address": "0x1F2170cC85b84bb2B52688EdCcd226148D530459",
-      "transactionHash": "0x47c1d0b5da6151882cfeff3029c9d687f8f97cb45887e82e3d142248f5fa2ac4"
+      "address": "0x299F6319Ed2a1B32d0664296D3d66f75B283622c",
+      "transactionHash": "0xdbe0ad2b6cb336bd02b7dc5465ad2bddb3b4e9ef9866a66ada7fc79c9a093a7c"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2024-07-11T12:59:33.915Z",
+  "updatedAt": "2024-08-06T01:26:08.347Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

@@ -73,9 +73,9 @@ function displayLoanDetails(details) {
     console.log(`
         Detalhes do Pedido de Empréstimo:
         - Tomador: ${details.borrower}
-        - Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-        - Juros Mínimos: ${details.minInterestRate}%
-        - Score: ${details.score}
+        - Valor: ${details.amountBRL} BRL
+        - Juros Máximo solicitado: ${details.minInterestRate}%
+        - Score do tomador: ${details.score}
         - Número de Empréstimos: ${details.loanCount}
         - Taxa de Inadimplência: ${details.userDefaultRate}%
         - Média de juros oferecido: ${details.averageIR}%
@@ -199,9 +199,9 @@ async function interactive() {
                 break;
             }
             case 2: {
-                const amount = readlineSync.questionFloat('Digite o valor do empréstimo em Ether: ');
+                const amount = readlineSync.questionFloat('Digite o valor do empréstimo em BRL: ');
                 const minInterestRate = readlineSync.questionInt('Digite o valor do juros mínimo desejado: ');
-                await requestLoan(web3.utils.toWei(amount.toString(), 'ether'), minInterestRate);
+                await requestLoan(amount, minInterestRate);
                 break;
             }
             case 3: {
@@ -228,9 +228,9 @@ async function interactive() {
                 const details = await contract.methods.getLoanRequestDetails(requestId).call();
                 displayLoanDetails(details);
 
-                const amount = readlineSync.questionFloat('Digite o valor que você quer dar emprestado em Ether: ');
+                const amount = readlineSync.questionFloat('Digite o valor que você quer dar emprestado em BRL: ');
                 const interestRate = readlineSync.questionInt('Digite o valor do juros: ');
-                await offerLoan(requestId, interestRate, web3.utils.toWei(amount.toString(), 'ether'));
+                await offerLoan(requestId, interestRate, amount);
                 console.log('Oferta de empréstimo feita com sucesso.');
                 break;
             }
@@ -292,11 +292,10 @@ async function interactive() {
                     const loanId = activeLoans[loanChoice - 1].id;
                     const amountPaid = await contract.methods.getAmountPaid(loanId).call();
                     const remainingAmount = await contract.methods.getRemainingAmount(loanId).call();
-                    console.log(`Valor já pago: ${web3.utils.fromWei(amountPaid, 'ether')} ETH`);
-                    console.log(`Valor restante: ${web3.utils.fromWei(remainingAmount, 'ether')} ETH`);
-                    const amountToPay = readlineSync.questionFloat('Digite o valor a ser pago em Ether: ');
-                    await repayLoan(loanId, web3.utils.toWei(amountToPay.toString(), 'ether'));
-                    console.log('Empréstimo pago com sucesso.');
+                    console.log(`Valor já pago: ${amountPaid} BRL`);
+                    console.log(`Valor restante: ${remainingAmount} BRL`);
+                    const amountToPay = readlineSync.questionFloat('Digite o valor a ser pago em BRL: ');
+                    await repayLoan(loanId, amountToPay);
                 }
                 break;
             }

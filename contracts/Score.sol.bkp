@@ -30,7 +30,6 @@ contract Score {
         bool repaid;
         bool defaulted; 
         uint amountRepaid;
-        uint averageIR; // Average Interest Rate
     }
 
     struct LoanInfo {
@@ -45,7 +44,6 @@ contract Score {
     mapping(uint => LoanRequest) public loanRequests;
     mapping(uint => LoanOffer[]) public loanOffers;
     mapping(uint => Loan) public activeLoans;
-    mapping(uint => uint[]) private offersIR;
     uint public loanRequestCounter;
     uint public reserveFund;
     uint public defaultRate;
@@ -65,18 +63,6 @@ contract Score {
         reserveFund += msg.value; // Inicializa o fundo de reserva com o valor enviado no deploy
         defaultRate = 5;
     }
-
-    function _calculateAverageInterestRate(uint requestID) internal view returns (uint) { 
-        uint[] storage rates = offersIR[requestID];
-        if (rates.length == 0) return 0;
-
-        uint total = 0;
-        for (uint i = 0; i < rates.length; i++) {
-            total += rates[i];
-        }
-        return total / rates.length;
-    }
-
 
     // Função para solicitar um empréstimo
     function requestLoan(uint amount, uint minInterestRate) public {
@@ -141,8 +127,6 @@ contract Score {
             accepted: false
         }));
 
-        offersIR[requestId].push(interestRate);
-
         emit LoanOffered(requestId, msg.sender, interestRate);
     }
 
@@ -184,8 +168,7 @@ contract Score {
             interestRate: bestOffer.interestRate,
             repaid: false,
             defaulted: false, // Inicializa como não inadimplente
-            amountRepaid: 0,
-            averageIR: 0
+            amountRepaid: 0
         });
 
         // Transferir o valor do empréstimo do contrato para o tomador após deduzir a taxa
@@ -422,8 +405,7 @@ contract Score {
         uint minInterestRate,
         uint score,
         uint loanCount,
-        uint userDefaultRate,
-        uint averageIR 
+        uint userDefaultRate
     ) {
         LoanRequest storage request = loanRequests[requestId];
         borrower = request.borrower;
@@ -432,7 +414,6 @@ contract Score {
         score = scores[borrower];
         loanCount = loanCounts[borrower];
         userDefaultRate = (totalLoans == 0) ? 0 : (defaultedLoans * 100) / totalLoans;
-        averageIR = _calculateAverageInterestRate(requestId);
     }
 
     // Função para obter empréstimos de um usuário com status
@@ -575,3 +556,4 @@ contract Score {
         return offers;
     }
 }
+

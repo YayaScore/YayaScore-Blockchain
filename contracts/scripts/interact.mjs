@@ -5,6 +5,13 @@ import readlineSync from 'readline-sync';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
+// Verificação de parâmetros da linha de comando
+const args = process.argv.slice(2);
+if (args.length === 0) {
+    console.error("Forneça o endereço do contrato como argumento");
+    process.exit(1);
+}
+
 // Configuração para obter o diretório atual
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,7 +20,7 @@ const __dirname = dirname(__filename);
 const web3 = new Web3(Web3.givenProvider || 'http://localhost:7545'); // Altere para o seu nó Ethereum
 
 // Endereço do contrato implantado
-const contractAddress = '0x1F2170cC85b84bb2B52688EdCcd226148D530459';
+const contractAddress = args[0];
 
 // Leitura do ABI do contrato
 const contractABI = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../build/contracts/Score.json'), 'utf8')).abi;
@@ -22,6 +29,12 @@ const contractABI = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../bu
 const contract = new web3.eth.Contract(contractABI, contractAddress);
 
 let userAddress = '';
+
+// Função genérica para estimar e enviar transações
+async function sendTransaction(method, options = {}) {
+    const gas = await method.estimateGas(options);
+    return method.send({ ...options, gas });
+}
 
 // Função para obter detalhes de um pedido de empréstimo
 async function getLoanRequestDetails(requestId) {
@@ -36,8 +49,7 @@ async function getLoanRequestDetails(requestId) {
 // Função para solicitar um empréstimo
 async function requestLoan(amount, minInterestRate) {
     try {
-        const gas = await contract.methods.requestLoan(amount, minInterestRate).estimateGas({ from: userAddress });
-        await contract.methods.requestLoan(amount, minInterestRate).send({ from: userAddress, gas });
+        await sendTransaction(contract.methods.requestLoan(amount, minInterestRate), { from: userAddress });
         console.log('Empréstimo solicitado com sucesso.');
     } catch (error) {
         console.error('Erro ao solicitar empréstimo:', error);
@@ -48,39 +60,57 @@ async function requestLoan(amount, minInterestRate) {
 async function offerLoan(requestId, interestRate, amount) {
     try {
         const details = await contract.methods.getLoanRequestDetails(requestId).call();
-        console.log(`
-Detalhes do Pedido de Empréstimo:
-- Tomador: ${details.borrower}
-- Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-- Juros Mínimos: ${details.minInterestRate}%
-- Score: ${details.score}
-- Número de Empréstimos: ${details.loanCount}
-- Taxa de Inadimplência: ${details.userDefaultRate}%
-`);
-        const gas = await contract.methods.offerLoan(requestId, interestRate).estimateGas({ from: userAddress, value: amount });
-        await contract.methods.offerLoan(requestId, interestRate).send({ from: userAddress, value: amount, gas });
+        displayLoanDetails(details);
+        await sendTransaction(contract.methods.offerLoan(requestId, interestRate), { from: userAddress, value: amount });
         console.log('Oferta de empréstimo feita com sucesso.');
     } catch (error) {
         console.error('Erro ao oferecer empréstimo:', error);
     }
 }
 
+// Função para exibir detalhes do pedido de empréstimo
+function displayLoanDetails(details) {
+    console.log(`
+        Detalhes do Pedido de Empréstimo:
+        - Tomador: ${details.borrower}
+        - Valor: ${details.amountBRL} BRL
+        - Juros Máximo solicitado: ${details.minInterestRate}%
+        - Score do tomador: ${details.score}
+        - Número de Empréstimos: ${details.loanCount}
+        - Taxa de Inadimplência: ${details.userDefaultRate}%
+        - Média de juros oferecido: ${details.averageIR}%
+    `);
+}
+
+function displayMenu() {
+    console.log('YaYa Score - Micro empréstimos e Score');
+    console.log('1) Endereços');
+    console.log('2) Solicitar empréstimo');
+    console.log('3) Oferecer empréstimo');
+    console.log('4) Finalizar solicitação de empréstimo');
+    console.log('5) Marcar empréstimo como inadimplente');
+    console.log('6) Pagar empréstimo');
+    console.log('7) Visualizar Score');
+    console.log('8) Cancelar solicitação de empréstimo');
+    console.log('9) Listar contratos do usuário');
+    console.log('10) Ver ofertas');
+    console.log('11) Sair');
+}
+
 // Função para obter pedidos de empréstimos pendentes
 async function getPendingLoanRequests() {
     try {
-        const pendingRequests = await contract.methods.getPendingLoanRequests().call();
-        return pendingRequests;
+        return await contract.methods.getPendingLoanRequests().call();
     } catch (error) {
         console.error('Erro ao obter pedidos de empréstimos pendentes:', error);
         return [];
     }
 }
 
-// Função para aceitar a melhor oferta de empréstimo
+// Função para finalizar um pedido de empréstimo
 async function finalizeLoanRequest(requestId) {
     try {
-        const gas = await contract.methods.finalizeLoanRequest(requestId).estimateGas({ from: userAddress });
-        await contract.methods.finalizeLoanRequest(requestId).send({ from: userAddress, gas });
+        await sendTransaction(contract.methods.finalizeLoanRequest(requestId), { from: userAddress });
         console.log('Empréstimo finalizado com sucesso.');
     } catch (error) {
         console.error('Erro ao finalizar empréstimo:', error);
@@ -90,8 +120,7 @@ async function finalizeLoanRequest(requestId) {
 // Função para marcar um empréstimo como inadimplente
 async function markLoanAsDefaulted(loanId) {
     try {
-        const gas = await contract.methods.markLoanAsDefaulted(loanId).estimateGas({ from: userAddress });
-        await contract.methods.markLoanAsDefaulted(loanId).send({ from: userAddress, gas });
+        await sendTransaction(contract.methods.markLoanAsDefaulted(loanId), { from: userAddress });
         console.log('Empréstimo marcado como inadimplente com sucesso.');
     } catch (error) {
         console.error('Erro ao marcar empréstimo como inadimplente:', error);
@@ -101,8 +130,7 @@ async function markLoanAsDefaulted(loanId) {
 // Função para pagar de volta o empréstimo
 async function repayLoan(loanId, amount) {
     try {
-        const gas = await contract.methods.repayLoan(loanId).estimateGas({ from: userAddress, value: amount });
-        await contract.methods.repayLoan(loanId).send({ from: userAddress, value: amount, gas });
+        await sendTransaction(contract.methods.repayLoan(loanId), { from: userAddress, value: amount });
         console.log('Empréstimo pago com sucesso.');
     } catch (error) {
         console.error('Erro ao pagar empréstimo:', error);
@@ -127,32 +155,10 @@ async function getAddresses() {
 // Função para obter empréstimos de um usuário
 async function getLoansByUser(address) {
     try {
-        const loans = await contract.methods.getLoansByUser(address).call();
-        return loans;
+        return await contract.methods.getLoansByUser(address).call();
     } catch (error) {
-        const errorMessage = error.message.split(': ').pop();
-        console.error('Erro ao obter empréstimos do usuário:', errorMessage);
+        console.error('Erro ao obter empréstimos do usuário:', error.message.split(': ').pop());
         return [];
-    }
-}
-
-// Função para obter o saldo pendente de um empréstimo
-async function getAmountPaid(loanId) {
-    try {
-        return await contract.methods.getAmountPaid(loanId).call();
-    } catch (error) {
-        console.error('Erro ao obter o valor pago do empréstimo:', error);
-        return 0;
-    }
-}
-
-// Função para obter o valor restante de um empréstimo
-async function getRemainingAmount(loanId) {
-    try {
-        return await contract.methods.getRemainingAmount(loanId).call();
-    } catch (error) {
-        console.error('Erro ao obter o valor restante do empréstimo:', error);
-        return 0;
     }
 }
 
@@ -169,445 +175,206 @@ async function getScore(address) {
 // Função para cancelar um empréstimo
 async function cancelLoanRequest(loanId) {
     try {
-        const gas = await contract.methods.cancelLoanRequest(loanId).estimateGas({ from: userAddress });
-        await contract.methods.cancelLoanRequest(loanId).send({ from: userAddress, gas });
+        await sendTransaction(contract.methods.cancelLoanRequest(loanId), { from: userAddress });
         console.log('Empréstimo cancelado com sucesso.');
     } catch (error) {
         console.error('Erro ao cancelar o empréstimo:', error);
     }
 }
 
-// Função para obter empréstimos não leiloados por usuário
-async function getUnauctionedLoansByUser(address) {
-    try {
-        return await contract.methods.getUnauctionedLoansByUser(address).call();
-    } catch (error) {
-        console.error('Erro ao obter empréstimos não leiloados do usuário:', error);
-        return [];
-    }
-}
-
-// Função para obter todos os empréstimos não leiloados
-async function getAllUnauctionedLoans() {
-    try {
-        return await contract.methods.getAllUnauctionedLoans().call();
-    } catch (error) {
-        console.error('Erro ao obter todos os empréstimos não leiloados:', error);
-        return [];
-    }
-}
-
-async function getContractBalance() {
-    try {
-        const balance = await web3.eth.getBalance(contractAddress);
-        return balance;
-    } catch (error) {
-        const errorMessage = error.message.split(': ').pop();
-        console.error('Erro ao obter o saldo do contrato:', errorMessage);
-        return null;
-    }
-}
-
 // Função para obter ofertas feitas por um usuário
 async function getOffersByUser(address) {
     try {
-        const offers = await contract.methods.getOffersByUser(address).call();
-        return offers;
+        return await contract.methods.getOffersByUser(address).call();
     } catch (error) {
         console.error('Erro ao obter ofertas do usuário:', error);
         return [];
     }
 }
 
-async function getOfferDetails(offerId) {
-    try {
-        const details = await contract.methods.getLoanRequestDetails(offerId).call();
-        const offers = await contract.methods.getLoanOffers(offerId).call();
-        const amountRepaid = await contract.methods.getAmountPaid(offerId).call();
-        const remainingAmount = await contract.methods.getRemainingAmount(offerId).call();
-
-        details.amountRepaid = amountRepaid; // Adiciona amountRepaid aos detalhes
-        details.remainingAmount = remainingAmount; // Adiciona remainingAmount aos detalhes
-
-        return { details, offers };
-    } catch (error) {
-        console.error('Erro ao obter detalhes da oferta:', error);
-        return { details: null, offers: null };
-    }
-}
-
-// Função interativa
+// Menu interativo
 async function interactive() {
     while (true) {
-        // Atualizar o menu interativo
-        console.log(`
-            1) Address
-            2) Request a Loan
-            3) Offer a Loan
-            4) Finalize Loan Request
-            5) Mark Loan as Defaulted
-            6) Repay Loan
-            7) Score
-            8) Cancel Loan
-            9) List Loans by User
-            10) See Contracts Balance
-            11) See Offers by User
-            12) Exit
-            `);
-            
-            const choice = readlineSync.questionInt('Escolha uma opção: ');
 
-if (choice === 1) {
-    const accounts = await getAddresses();
-    accounts.forEach((account, index) => {
-        console.log(`${index + 1}) ${account.address} (Balance: ${account.balance} ETH)`);
-    });
-    const accountChoice = readlineSync.questionInt('Escolha um endereço: ');
-    if (accountChoice > 0 && accountChoice <= accounts.length) {
-        userAddress = accounts[accountChoice - 1].address;
-        console.log(`Endereço definido como: ${userAddress}`);
-    } else {
-        console.log('Escolha inválida.');
-    }
-} else if (choice === 2) {
-    console.log(`
-    1) Solicitar Empréstimo
-    2) Voltar para a tela inicial
-    `);
-    const subChoice = readlineSync.questionInt('Escolha uma opção: ');
-    if (subChoice === 1) {
-        const amount = readlineSync.questionFloat('Digite o valor do empréstimo em Ether: ');
-        const minInterestRate = readlineSync.questionInt('Digite o valor do juros mínimo desejado: ');
-        await requestLoan(web3.utils.toWei(amount.toString(), 'ether'), minInterestRate);
-    }
-} else if (choice === 3) {
-    const pendingRequests = await getPendingLoanRequests();
-    const validRequests = [];
-    for (const requestId of pendingRequests) {
-        const details = await contract.methods.getLoanRequestDetails(requestId).call();
-        if (!details.cancelled) {
-            validRequests.push(requestId);
-        }
-    }
+        displayMenu();
 
-    if (validRequests.length === 0) {
-        console.log('Não há pedidos de empréstimos pendentes.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    validRequests.forEach((requestId, index) => {
-        console.log(`${index + 1}) Empréstimo ID: ${requestId}`);
-    });
-    const requestIdChoice = readlineSync.questionInt('Escolha um ID de empréstimo para ver os detalhes ou 0 para voltar: ');
-if (requestIdChoice === 0) continue;
-if (requestIdChoice > 0 && requestIdChoice <= validRequests.length) {
-    const requestId = validRequests[requestIdChoice - 1];
-    const details = await contract.methods.getLoanRequestDetails(requestId).call();
-    console.log(`
-Detalhes do Pedido de Empréstimo:
-- Tomador: ${details.borrower}
-- Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-- Juros Mínimos: ${details.minInterestRate}%
-- Score: ${details.score}
-- Número de Empréstimos: ${details.loanCount}
-- Taxa de Inadimplência: ${details.userDefaultRate}%
-`);
-    console.log(`
-    1) Fazer Empréstimo
-    2) Voltar para a tela inicial
-    `);
-    const offerChoice = readlineSync.questionInt('Escolha uma opção: ');
-    if (offerChoice === 1) {
-        const amount = readlineSync.questionFloat('Digite o valor que você quer dar emprestado em Ether: ');
-        const interestRate = readlineSync.questionInt('Digite o valor do juros: ');
-        await offerLoan(requestId, interestRate, web3.utils.toWei(amount.toString(), 'ether'));
-        console.log('Oferta de empréstimo feita com sucesso.');
-    }
-} else {
-    console.log('Escolha inválida.');
-}
-} else if (choice === 4) {
-    const loans = userAddress === contractAddress ? await getAllUnauctionedLoans() : await getUnauctionedLoansByUser(userAddress);
-    if (loans.length === 0) {
-        console.log('Não há empréstimos não leiloados.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    loans.forEach((loan, index) => {
-        console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-    });
-    const loanChoice = readlineSync.questionInt('Escolha um empréstimo para finalizar ou 0 para voltar: ');
-    if (loanChoice !== 0) {
-        const loanId = loans[loanChoice - 1].id;
-        console.log(`
-        1) Finalizar Empréstimo
-        2) Voltar para a tela inicial
-        `);
-        const finalizeChoice = readlineSync.questionInt('Escolha uma opção: ');
-        if (finalizeChoice === 1) {
-            await finalizeLoanRequest(loanId);
-    }
-}
-} else if (choice === 5) {
-    const loanIds = await getLoansByUser(userAddress);
-    if (loanIds.length === 0) {
-        console.log('Não há empréstimos ativos para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    let index = 1;
-    let activeLoans = [];
-    loanIds.forEach((loan) => {
-        if (loan.status === "ativo") {
-            activeLoans.push(loan);
-            console.log(`${index}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-            index++;
-        }
-    });
-    if (activeLoans.length === 0) {
-        console.log('Não há empréstimos ativos para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    const loanChoice = readlineSync.questionInt('Escolha um empréstimo para marcar como inadimplente ou 0 para voltar: ');
-if (loanChoice === 0) continue;
-if (loanChoice > 0 && loanChoice <= activeLoans.length) {
-    const loanId = activeLoans[loanChoice - 1].id;
-    console.log(`
-    1) Marcar como inadimplente
-    2) Voltar para a tela inicial
-    `);
-    const defaultChoice = readlineSync.questionInt('Escolha uma opção: ');
-    if (defaultChoice === 1) {
-        await markLoanAsDefaulted(loanId);
-        console.log('Empréstimo marcado como inadimplente com sucesso.');
-    }
-} else {
-    console.log('Escolha inválida.');
-}
-} else if (choice === 6) {
-    const loanIds = await getLoansByUser(userAddress);
-    if (loanIds.length === 0) {
-        console.log('Não há empréstimos ativos para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    let index = 1;
-    let activeLoans = [];
-    loanIds.forEach((loan) => {
-        if (loan.status === "ativo") {
-            activeLoans.push(loan);
-            console.log(`${index}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-            index++;
-        }
-    });
-    if (activeLoans.length === 0) {
-        console.log('Não há empréstimos ativos para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    const loanChoice = readlineSync.questionInt('Escolha um empréstimo para pagar ou 0 para voltar: ');
-if (loanChoice === 0) continue;
-if (loanChoice > 0 && loanChoice <= activeLoans.length) {
-    const loanId = activeLoans[loanChoice - 1].id;
-    console.log(`
-    1) Pagar Empréstimo
-    2) Voltar para a tela inicial
-    `);
-    const repayChoice = readlineSync.questionInt('Escolha uma opção: ');
-    if (repayChoice === 1) {
-        const amountPaid = await getAmountPaid(loanId);
-        const remainingAmount = await getRemainingAmount(loanId);
-        console.log(`Valor já pago: ${web3.utils.fromWei(amountPaid, 'ether')} ETH`);
-        console.log(`Valor restante: ${web3.utils.fromWei(remainingAmount, 'ether')} ETH`);
-        const amount = readlineSync.questionFloat('Digite o valor que você quer pagar em Ether: ');
-        await repayLoan(loanId, web3.utils.toWei(amount.toString(), 'ether'));
-        console.log('Empréstimo pago com sucesso.');
-    }
-} else {
-    console.log('Escolha inválida.');
-
-    }
-} else if (choice === 7) {
-    const score = await getScore(userAddress);
-    console.log(`Seu score é: ${score}`);
-} else if (choice === 8) {
-    const loanIds = await getLoansByUser(userAddress);
-    if (loanIds.length === 0) {
-        console.log('Não há empréstimos pendentes para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    let index = 1;
-    let pendingLoans = [];
-    loanIds.forEach((loan) => {
-        if (loan.status === "pendente") {
-            pendingLoans.push(loan);
-            console.log(`${index}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-            index++;
-        }
-    });
-    if (pendingLoans.length === 0) {
-        console.log('Não há empréstimos pendentes para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-    const loanChoice = readlineSync.questionInt('Escolha um empréstimo para cancelar ou 0 para voltar: ');
-if (loanChoice === 0) continue;
-if (loanChoice > 0 && loanChoice <= pendingLoans.length) {
-    const loanId = pendingLoans[loanChoice - 1].id;
-    try {
-        const offers = await contract.methods.getLoanOffers(loanId).call();
-        if (offers.length > 0) {
-            console.log('Não é possível cancelar o empréstimo, pois já há ofertas.');
-        } else {
-            console.log(`
-            1) Cancelar Empréstimo
-            2) Voltar para a tela inicial
-            `);
-            const cancelChoice = readlineSync.questionInt('Escolha uma opção: ');
-            if (cancelChoice === 1) {
-                await cancelLoanRequest(loanId);
-                console.log('Empréstimo cancelado com sucesso.');
-            }
-        }
-    } catch (error) {
-        const errorMessage = error.message.split(': ').pop();
-        console.error('Erro ao cancelar o empréstimo:', errorMessage);
-    }
-} else {
-    console.log('Escolha inválida.');
-    }
-} else if (choice === 9) { // Nova opção para listar empréstimos do usuário
-    if (!web3.utils.isAddress(userAddress)) {
-        console.log('Endereço de usuário inválido.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-
-    const loanIds = await getLoansByUser(userAddress);
-    if (loanIds.length === 0) {
-        console.log('Não há empréstimos para este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-
-    while (true) {
-        console.log('\nEmpréstimos:');
-        loanIds.forEach((loan, index) => {
-            console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-        });
-    
-        console.log('\nOpções:');
-        console.log('1) Escolher um empréstimo para ver os detalhes');
-        console.log('2) Voltar para a tela inicial');
-    
-        const loanChoice = readlineSync.questionInt('Escolha uma opção: ');
-    
-        if (loanChoice === 1) {
-            const loanIndex = readlineSync.questionInt('Escolha o número do empréstimo para ver os detalhes: ');
-            if (loanIndex > 0 && loanIndex <= loanIds.length) {
-                const loanId = loanIds[loanIndex - 1].id;
-                const details = await contract.methods.getLoanRequestDetails(loanId).call();
-                console.log(`
-    Detalhes do Pedido de Empréstimo:
-    - Tomador: ${details.borrower}
-    - Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-    - Juros Mínimos: ${details.minInterestRate}%
-    - Score: ${details.score}
-    - Número de Empréstimos: ${details.loanCount}
-    - Taxa de Inadimplência: ${details.userDefaultRate}%
-    `);
-                console.log('\nOpções:');
-                console.log('1) Voltar para a lista de empréstimos');
-                console.log('2) Voltar para a tela inicial');
-                const subChoice = readlineSync.questionInt('Escolha uma opção: ');
-                if (subChoice === 2) break;
-            } else {
-                console.log('Escolha inválida.');
-            }
-        } else if (loanChoice === 2) {
-            break;
-        } else {
-            console.log('Escolha inválida.');
-        }
-    }
-} 
-else if (choice === 11) {
-    const offers = await getOffersByUser(userAddress);
-    if (offers.length === 0) {
-        console.log('Não há ofertas feitas por este usuário.');
-        readlineSync.question('Pressione Enter para voltar para a tela inicial.');
-        continue;
-    }
-
-    while (true) {
-        console.log('\nOfertas:');
-        offers.forEach((offer, index) => {
-            console.log(`${index + 1}) Oferta ID: ${offer.id} (Status: ${offer.status})`);
-        });
-
-        console.log('\nOpções:');
-        console.log('0) Voltar para a tela inicial');
-        console.log('Escolha o número da oferta para ver os detalhes:');
-
-        const offerChoice = readlineSync.questionInt('Escolha uma opção: ');
-
-        if (offerChoice === 0) {
-            break;
-        } else if (offerChoice > 0 && offerChoice <= offers.length) {
-            const offerId = offers[offerChoice - 1].id;
-            const { details, offers: offerList } = await getOfferDetails(offerId);
-
-            if (offerList) {
-                offerList.forEach(async (offerDetail, index) => {
-                    if (offerDetail.lender === userAddress) {
-                        if (offers[offerChoice - 1].status === "pago" || offers[offerChoice - 1].status === "ativo") {
-                            console.log(`
-Detalhes da Oferta:
-- Tomador: ${details.borrower}
-- Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-- Juros: ${offerDetail.interestRate}%
-`);
-                        } else if (offers[offerChoice - 1].status === "leiloado-nao-ganho") {
-                            console.log(`
-Detalhes da Oferta:
-- Tomador: ${details.borrower}
-- Valor Pedido: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-- Juros Ofertado: ${offerDetail.interestRate}%
-`);
-                        } else if (offers[offerChoice - 1].status === "inadimplente") {
-                            const amountPaid = await getAmountPaid(offerId);
-                            const remainingAmount = await getRemainingAmount(offerId);
-                            console.log(`
-Detalhes da Oferta:
-- Tomador: ${details.borrower}
-- Valor Pedido: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
-- Juros Ofertado: ${offerDetail.interestRate}%
-- Valor Pago: ${web3.utils.fromWei(amountPaid.toString(), 'ether')} ETH
-- Valor Faltando: ${web3.utils.fromWei(remainingAmount.toString(), 'ether')} ETH
-`);
-                        }
-                    }
+        const choice = readlineSync.questionInt('Escolha uma opção: ');
+        switch (choice) {
+            case 1: {
+                const accounts = await getAddresses();
+                accounts.forEach((account, index) => {
+                    console.log(`${index + 1}) ${account.address} (Balance: ${account.balance} ETH)`);
                 });
+                const accountChoice = readlineSync.questionInt('Escolha um endereço: ');
+                if (accountChoice > 0 && accountChoice <= accounts.length) {
+                    userAddress = accounts[accountChoice - 1].address;
+                    console.log(`Endereço definido como: ${userAddress}`);
+                } else {
+                    console.log('Escolha inválida.');
+                }
+                break;
             }
+            case 2: {
+                const amount = readlineSync.questionFloat('Digite o valor do empréstimo em BRL: ');
+                const minInterestRate = readlineSync.questionInt('Digite o valor do juros mínimo desejado: ');
+                await requestLoan(amount, minInterestRate);
+                break;
+            }
+            case 3: {
+                const pendingRequests = await getPendingLoanRequests();
+                const validRequests = pendingRequests.filter(async requestId => {
+                    const details = await contract.methods.getLoanRequestDetails(requestId).call();
+                    return !details.cancelled;
+                });
 
-            console.log('\nOpções:');
-            console.log('1) Voltar para a lista de ofertas');
-            console.log('2) Voltar para a tela inicial');
-            const subChoice = readlineSync.questionInt('Escolha uma opção: ');
-            if (subChoice === 2) break;
-        } else {
-            console.log('Escolha inválida.');
+                if (validRequests.length === 0) {
+                    console.log('Não há pedidos de empréstimos pendentes.');
+                    readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                    continue;
+                }
+
+                validRequests.forEach((requestId, index) => {
+                    console.log(`${index + 1}) Empréstimo ID: ${requestId}`);
+                });
+
+                const requestIdChoice = readlineSync.questionInt('Escolha um ID de empréstimo para ver os detalhes ou 0 para voltar: ');
+                if (requestIdChoice === 0) continue;
+
+                const requestId = validRequests[requestIdChoice - 1];
+                const details = await contract.methods.getLoanRequestDetails(requestId).call();
+                displayLoanDetails(details);
+
+                const amount = readlineSync.questionFloat('Digite o valor que você quer dar emprestado em BRL: ');
+                const interestRate = readlineSync.questionInt('Digite o valor do juros: ');
+                await offerLoan(requestId, interestRate, amount);
+                console.log('Oferta de empréstimo feita com sucesso.');
+                break;
+            }
+            case 4: {
+                const loans = userAddress === contractAddress ? await getLoansByUser(userAddress) : await getLoansByUser(userAddress);
+                if (loans.length === 0) {
+                    console.log('Não há empréstimos não leiloados.');
+                    readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                    continue;
+                }
+                loans.forEach((loan, index) => {
+                    console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                });
+                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para finalizar ou 0 para voltar: ');
+                if (loanChoice !== 0) {
+                    const loanId = loans[loanChoice - 1].id;
+                    await finalizeLoanRequest(loanId);
+                }
+                break;
+            }
+            case 5: {
+                const loans = await getLoansByUser(userAddress);
+                const activeLoans = loans.filter(loan => loan.status === "ativo");
+
+                if (activeLoans.length === 0) {
+                    console.log('Não há empréstimos ativos para este usuário.');
+                    readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                    continue;
+                }
+
+                activeLoans.forEach((loan, index) => {
+                    console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                });
+
+                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para marcar como inadimplente ou 0 para voltar: ');
+                if (loanChoice !== 0) {
+                    const loanId = activeLoans[loanChoice - 1].id;
+                    await markLoanAsDefaulted(loanId);
+                    console.log('Empréstimo marcado como inadimplente com sucesso.');
+                }
+                break;
+            }
+            case 6: {
+                const loans = await getLoansByUser(userAddress);
+                const activeLoans = loans.filter(loan => loan.status === "ativo");
+
+                if (activeLoans.length === 0) {
+                    console.log('Não há empréstimos ativos para este usuário.');
+                    readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                    continue;
+                }
+
+                activeLoans.forEach((loan, index) => {
+                    console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                });
+
+                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para pagar ou 0 para voltar: ');
+                if (loanChoice !== 0) {
+                    const loanId = activeLoans[loanChoice - 1].id;
+                    const amountPaid = await contract.methods.getAmountPaid(loanId).call();
+                    const remainingAmount = await contract.methods.getRemainingAmount(loanId).call();
+                    console.log(`Valor já pago: ${amountPaid} BRL`);
+                    console.log(`Valor restante: ${remainingAmount} BRL`);
+                    const amountToPay = readlineSync.questionFloat('Digite o valor a ser pago em BRL: ');
+                    await repayLoan(loanId, amountToPay);
+                }
+                break;
+            }
+            case 7: {
+                const score = await getScore(userAddress);
+                console.log(`Seu score é: ${score}`);
+                break;
+            }
+            case 8: {
+                const loans = await getLoansByUser(userAddress);
+                const activeLoans = loans.filter(loan => loan.status === "ativo");
+
+                if (activeLoans.length === 0) {
+                    console.log('Não há empréstimos ativos para este usuário.');
+                    readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                    continue;
+                }
+
+                activeLoans.forEach((loan, index) => {
+                    console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                });
+
+                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para cancelar ou 0 para voltar: ');
+                if (loanChoice !== 0) {
+                    const loanId = activeLoans[loanChoice - 1].id;
+                    await cancelLoanRequest(loanId);
+                    console.log('Empréstimo cancelado com sucesso.');
+                }
+                break;
+            }
+            case 9: {
+                const loans = await getLoansByUser(userAddress);
+                if (loans.length === 0) {
+                    console.log('Não há empréstimos para este usuário.');
+                } else {
+                    loans.forEach((loan, index) => {
+                        console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                    });
+                }
+                readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                break;
+            }
+            case 10: {
+                const offers = await getOffersByUser(userAddress);
+                if (offers.length === 0) {
+                    console.log('Não há ofertas para este usuário.');
+                } else {
+                    offers.forEach((offer, index) => {
+                        console.log(`${index + 1}) Oferta ID: ${offer.id} (Status: ${offer.status})`);
+                    });
+                }
+                readlineSync.question('Pressione Enter para voltar para a tela inicial.');
+                break;
+            }
+            case 11:
+                console.log('Saindo...');
+                process.exit(0);
+            default:
+                console.log('Escolha inválida.');
+                break;
         }
     }
 }
 
-else if (choice === 12) {
-    break;
-} else {
-    console.log('Opção não reconhecida.');
-}
-            }
-        }
-interactive();
+// Inicialização do menu interativo
+interactive().catch(error => console.error('Erro ao executar o script:', error));

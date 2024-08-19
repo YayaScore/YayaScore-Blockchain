@@ -5,6 +5,8 @@ import readlineSync from 'readline-sync';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
+const conversionRate = BigInt(67920000000000); // 1 BRL in Wei
+
 // Verificação de parâmetros da linha de comando
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -17,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Configuração da conexão com o nó Ethereum
-const web3 = new Web3(Web3.givenProvider || 'http://localhost:7545'); // Altere para o seu nó Ethereum
+const web3 = new Web3(Web3.givenProvider || 'https://eth-holesky.g.alchemy.com/v2/cuarhBx4On1Z8xiHjnbH3qmsHy9_ywGc'); // Altere para o seu nó Ethereum
 
 // Endereço do contrato implantado
 const contractAddress = args[0];
@@ -29,6 +31,14 @@ const contractABI = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../bu
 const contract = new web3.eth.Contract(contractABI, contractAddress);
 
 let userAddress = '';
+
+function _convertBRLtoWei(amountInBRL) {
+    return BigInt(amountInBRL) * conversionRate;
+}
+
+function _convertWeiToBRL(amountInWei) {
+    return Number(amountInWei) / Number(conversionRate);
+}
 
 // Função genérica para estimar e enviar transações
 async function sendTransaction(method, options = {}) {
@@ -42,8 +52,7 @@ async function getLoanRequestDetails(requestId) {
         const details = await contract.methods.getLoanRequestDetails(requestId).call();
         console.log('Detalhes do Pedido de Empréstimo:', details);
     } catch (error) {
-        console.error('Erro ao obter detalhes do pedido de empréstimo:', error);
-    }
+        console.error('Erro ao obter detalhes do pedido de empréstimo:', error); }
 }
 
 // Função para solicitar um empréstimo
@@ -70,16 +79,30 @@ async function offerLoan(requestId, interestRate, amount) {
 
 // Função para exibir detalhes do pedido de empréstimo
 function displayLoanDetails(details) {
+    let value = _convertWeiToBRL(BigInt(details.amount));
     console.log(`
         Detalhes do Pedido de Empréstimo:
         - Tomador: ${details.borrower}
-        - Valor: ${web3.utils.fromWei(details.amount.toString(), 'ether')} ETH
+        - Valor: ${value} BRL 
         - Juros Mínimos: ${details.minInterestRate}%
         - Score: ${details.score}
         - Número de Empréstimos: ${details.loanCount}
         - Taxa de Inadimplência: ${details.userDefaultRate}%
         - Média de juros oferecido: ${details.averageIR}%
     `);
+}
+
+function displayMenu() {
+    console.log('\n1) Solicitar empréstimo');
+    console.log('2) Oferecer empréstimo');
+    console.log('3) Finalizar solicitação de empréstimo');
+    console.log('4) Marcar empréstimo como inadimplente');
+    console.log('5) Pagar empréstimo');
+    console.log('6) Visualizar Score');
+    console.log('7) Cancelar solicitação de empréstimo');
+    console.log('8) Listar contratos do usuário');
+    console.log('9) Ver ofertas');
+    console.log('10) Sair\n');
 }
 
 // Função para obter pedidos de empréstimos pendentes
@@ -177,34 +200,43 @@ async function getOffersByUser(address) {
     }
 }
 
+let loggedIn = false;
+
+async function logIn() {
+    console.log("YaYa Score - Miccro Empréstimos e Score");
+    console.log("1) Fazer LogIn");
+    console.log("2) Sair");
+    const choice = readlineSync.questionInt("\nEscolha uma opção: ");
+    switch (choice) {
+        case 1:
+            const cpf = readlineSync.question("\nCPF: ");
+            userAddress = readlineSync.question("Endereço da carteira: ");
+            interactive();
+            break;
+        case 2:
+            console.log("Saindo...");
+            break;
+        default:
+            console.log("Opção Inválida");
+            break;
+    }
+}
+
 // Menu interativo
 async function interactive() {
     while (true) {
-        console.log(`YaYa Score - Micro empréstimos e Score\n1) Address \n2) Request a Loan \n3) Offer a Loan \n4) Finalize Loan Request \n5) Mark Loan as Defaulted \n6) Repay Loan \n7) Score \n8) Cancel Loan \n9) List Loans by User \n10) See Offers by User \n11) Exit \n`);
+        displayMenu();
 
         const choice = readlineSync.questionInt('Escolha uma opção: ');
         switch (choice) {
             case 1: {
-                const accounts = await getAddresses();
-                accounts.forEach((account, index) => {
-                    console.log(`${index + 1}) ${account.address} (Balance: ${account.balance} ETH)`);
-                });
-                const accountChoice = readlineSync.questionInt('Escolha um endereço: ');
-                if (accountChoice > 0 && accountChoice <= accounts.length) {
-                    userAddress = accounts[accountChoice - 1].address;
-                    console.log(`Endereço definido como: ${userAddress}`);
-                } else {
-                    console.log('Escolha inválida.');
-                }
+                const amountInBRL = readlineSync.questionFloat('Digite o valor do empréstimo: ');
+                const minInterestRate = readlineSync.questionInt('Digite o valor do juros mínimo desejado: ');
+                const amount = _convertBRLtoWei(amountInBRL);
+                await requestLoan(amount, minInterestRate);
                 break;
             }
             case 2: {
-                const amount = readlineSync.questionFloat('Digite o valor do empréstimo em Ether: ');
-                const minInterestRate = readlineSync.questionInt('Digite o valor do juros mínimo desejado: ');
-                await requestLoan(web3.utils.toWei(amount.toString(), 'ether'), minInterestRate);
-                break;
-            }
-            case 3: {
                 const pendingRequests = await getPendingLoanRequests();
                 const validRequests = pendingRequests.filter(async requestId => {
                     const details = await contract.methods.getLoanRequestDetails(requestId).call();
@@ -228,13 +260,14 @@ async function interactive() {
                 const details = await contract.methods.getLoanRequestDetails(requestId).call();
                 displayLoanDetails(details);
 
-                const amount = readlineSync.questionFloat('Digite o valor que você quer dar emprestado em Ether: ');
+                const amountBRL = readlineSync.questionFloat('Confirme o valor a ser emprestado: ');
                 const interestRate = readlineSync.questionInt('Digite o valor do juros: ');
-                await offerLoan(requestId, interestRate, web3.utils.toWei(amount.toString(), 'ether'));
+                const amountWei = _convertBRLtoWei(amountBRL);
+                await offerLoan(requestId, interestRate, amountWei);
                 console.log('Oferta de empréstimo feita com sucesso.');
                 break;
             }
-            case 4: {
+            case 3: {
                 const loans = userAddress === contractAddress ? await getLoansByUser(userAddress) : await getLoansByUser(userAddress);
                 if (loans.length === 0) {
                     console.log('Não há empréstimos não leiloados.');
@@ -251,7 +284,7 @@ async function interactive() {
                 }
                 break;
             }
-            case 5: {
+            case 4: {
                 const loans = await getLoansByUser(userAddress);
                 const activeLoans = loans.filter(loan => loan.status === "ativo");
 
@@ -273,7 +306,7 @@ async function interactive() {
                 }
                 break;
             }
-            case 6: {
+            case 5: {
                 const loans = await getLoansByUser(userAddress);
                 const activeLoans = loans.filter(loan => loan.status === "ativo");
 
@@ -292,20 +325,23 @@ async function interactive() {
                     const loanId = activeLoans[loanChoice - 1].id;
                     const amountPaid = await contract.methods.getAmountPaid(loanId).call();
                     const remainingAmount = await contract.methods.getRemainingAmount(loanId).call();
-                    console.log(`Valor já pago: ${web3.utils.fromWei(amountPaid, 'ether')} ETH`);
-                    console.log(`Valor restante: ${web3.utils.fromWei(remainingAmount, 'ether')} ETH`);
-                    const amountToPay = readlineSync.questionFloat('Digite o valor a ser pago em Ether: ');
-                    await repayLoan(loanId, web3.utils.toWei(amountToPay.toString(), 'ether'));
+                    const amountPaidBRL = _convertWeiToBRL(amountPaid);
+                    const remainingAmountBRL = _convertWeiToBRL(remainingAmount)
+                    console.log(`Valor já pago: ${amountPaidBRL} BRL`);
+                    console.log(`Valor restante: ${remainingAmountBRL} BRL`);
+                    const amountToPayBRL = readlineSync.questionFloat('Digite o valor a ser pago: ');
+                    const amountToPayWei = _convertBRLtoWei(amountToPayBRL);
+                    await repayLoan(loanId, amountToPayWei);
                     console.log('Empréstimo pago com sucesso.');
                 }
                 break;
             }
-            case 7: {
+            case 6: {
                 const score = await getScore(userAddress);
                 console.log(`Seu score é: ${score}`);
                 break;
             }
-            case 8: {
+            case 7: {
                 const loans = await getLoansByUser(userAddress);
                 const activeLoans = loans.filter(loan => loan.status === "ativo");
 
@@ -327,7 +363,7 @@ async function interactive() {
                 }
                 break;
             }
-            case 9: {
+            case 8: {
                 const loans = await getLoansByUser(userAddress);
                 if (loans.length === 0) {
                     console.log('Não há empréstimos para este usuário.');
@@ -339,7 +375,7 @@ async function interactive() {
                 readlineSync.question('Pressione Enter para voltar para a tela inicial.');
                 break;
             }
-            case 10: {
+            case 9: {
                 const offers = await getOffersByUser(userAddress);
                 if (offers.length === 0) {
                     console.log('Não há ofertas para este usuário.');
@@ -351,7 +387,7 @@ async function interactive() {
                 readlineSync.question('Pressione Enter para voltar para a tela inicial.');
                 break;
             }
-            case 11:
+            case 10:
                 console.log('Saindo...');
                 process.exit(0);
             default:
@@ -362,4 +398,4 @@ async function interactive() {
 }
 
 // Inicialização do menu interativo
-interactive().catch(error => console.error('Erro ao executar o script:', error));
+logIn().catch(error => console.error('Erro ao executar o script:', error));

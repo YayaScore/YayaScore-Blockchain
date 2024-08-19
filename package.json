@@ -8,8 +8,10 @@
     "test:unit": "vue-cli-service test:unit"
   },
   "dependencies": {
+    "@truffle/hdwallet-provider": "^2.1.15",
     "core-js": "^3.8.3",
     "readline-sync": "^1.4.10",
+    "truffle-hdwallet-provider": "^1.0.17",
     "vue": "^3.2.13",
     "vue-router": "^4.0.3",
     "vuex": "^4.0.0",

@@ -80,7 +80,9 @@ contract Score {
 
     // Função para solicitar um empréstimo
     function requestLoan(uint amount, uint minInterestRate) public {
-        require(amount >= 5 ether && amount <= 99 ether, "Loan amount must be between 5 and 99 ether");
+        uint minAmount = 6791690000000000;
+        uint maxAmount = 67916880000000000;
+        require(amount >= minAmount && amount <= maxAmount, "Loan amount must be between 100 and 1000 BRL");
         require(getActiveLoanCount(msg.sender) < maxLoansPerUser, "Maximum loan requests reached");
 
         loanRequestCounter++;
@@ -275,7 +277,7 @@ contract Score {
         uint W_P = 50;
 
         // Normalização
-        uint V_normalizado = (valorEmprestado - 5) * 100 / (99 - 5);
+        uint V_normalizado = (valorEmprestado - 5) * 100 / (1000 - 100); // 100 - 1000 MinMax 
         uint P_normalizado = taxaPagamentoCompleto;
 
         // Função de decaimento para número de empréstimos

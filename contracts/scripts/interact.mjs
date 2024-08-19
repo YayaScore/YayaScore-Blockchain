@@ -46,6 +46,65 @@ async function sendTransaction(method, options = {}) {
     return method.send({ ...options, gas });
 }
 
+// Função para exibir detalhes do pedido de empréstimo
+function displayLoanDetails(details) {
+    let value = _convertWeiToBRL(BigInt(details.amount));
+    console.log(`
+        Detalhes do Pedido de Empréstimo:
+        - Tomador: ${details.borrower}
+        - Valor: ${value} BRL 
+        - Juros Mínimos: ${details.minInterestRate}%
+        - Score: ${details.score}
+        - Número de Empréstimos: ${details.loanCount}
+        - Taxa de Inadimplência: ${details.userDefaultRate}%
+        - Média de juros oferecido: ${details.averageIR}%
+        `);
+}
+
+// Função para verificar e cancelar empréstimos que passaram do tempo permitido para leilão
+async function checkAndCancelLoans() {
+    try {
+        const pendingLoans = await getPendingLoanRequests();
+        const expirationTime = 5 * 60; // 5 minutos em segundos
+
+        for (let i = 0; i < pendingLoans.length; i++) {
+            const requestId = pendingLoans[i];
+            const timeRemaining = await contract.methods.getTimeRemaining(requestId, expirationTime).call();
+            if (timeRemaining == 0) {
+                await cancelLoanRequest(requestId);
+            }
+        }
+    } catch (error) {
+        console.error('Erro ao verificar e cancelar empréstimos:', error);
+    }
+}
+
+// Função para verificar e marcar empréstimos como inadimplentes
+async function checkAndMarkDefaultedLoans() {
+    try {
+        const loans = await getLoansByUser(userAddress);
+        const activeLoans = loans.filter(loan => loan.status === "ativo");
+        const expirationTime = 5 * 60; // 5 minutos em segundos
+
+        for (let i = 0; i < activeLoans.length; i++) {
+            const loanId = activeLoans[i].id;
+            const timeRemaining = await contract.methods.getTimeRemaining(loanId, expirationTime).call();
+            if (timeRemaining == 0) {
+                await markLoanAsDefaulted(loanId);
+            }
+        }
+    } catch (error) {
+        console.error('Erro ao verificar e marcar empréstimos como inadimplentes:', error);
+    }
+}
+// Função para verificar empréstimos a cada 1 minuto
+function startPeriodicChecks() {
+    setInterval(async () => {
+        await checkAndCancelLoans();
+        await checkAndMarkDefaultedLoans();
+    }, 30 * 1000); // 60 * 1000 ms = 1 minuto
+}
+
 // Função para obter detalhes de um pedido de empréstimo
 async function getLoanRequestDetails(requestId) {
     try {
@@ -78,20 +137,6 @@ async function offerLoan(requestId, interestRate, amount) {
     }
 }
 
-// Função para exibir detalhes do pedido de empréstimo
-function displayLoanDetails(details) {
-    let value = _convertWeiToBRL(BigInt(details.amount));
-    console.log(`
-        Detalhes do Pedido de Empréstimo:
-        - Tomador: ${details.borrower}
-        - Valor: ${value} BRL 
-        - Juros Mínimos: ${details.minInterestRate}%
-        - Score: ${details.score}
-        - Número de Empréstimos: ${details.loanCount}
-        - Taxa de Inadimplência: ${details.userDefaultRate}%
-        - Média de juros oferecido: ${details.averageIR}%
-    `);
-}
 
 // Função para obter pedidos de empréstimos pendentes
 async function getPendingLoanRequests() {
@@ -323,7 +368,7 @@ async function interactive() {
             }
             case 8: {
                 const loans = await getLoansByUser(userAddress);
-                const activeLoans = loans.filter(loan => loan.status === "ativo");
+                const activeLoans = loans.filter(loan => loan.status === "pendente");
 
                 if (activeLoans.length === 0) {
                     console.log('Não há empréstimos ativos para este usuário.');
@@ -346,13 +391,26 @@ async function interactive() {
             case 9: {
                 const loans = await getLoansByUser(userAddress);
                 if (loans.length === 0) {
-                    console.log('Não há empréstimos para este usuário.');
+                    console.log("Não há empréstimos para esse usuário");
+                    break;
                 } else {
-                    loans.forEach((loan, index) => {
-                        console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-                    });
+                    while (true) { 
+                        loans.forEach((loan, index) => {
+                            console.log(`${index + 1} - Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                        });
+                        const choice = readlineSync.questionInt("\nSelecione um empréstimo para visualizar os detalhes ou 0 para voltar: ");
+                        if (choice === 0) {
+                            break;
+                        } else if (choice > 0 && choice <= loans.length) {
+                            const loanId = loans[choice - 1].id;
+                            const details = await contract.methods.getLoanRequestDetails(loanId).call();
+                            displayLoanDetails(details);
+                            console.log("----");
+                        } else {
+                            console.log("Escolha inválida.");
+                        }
+                    }
                 }
-                readlineSync.question('Pressione Enter para voltar para a tela inicial.');
                 break;
             }
             case 10: {
@@ -374,6 +432,7 @@ async function interactive() {
                 console.log('Escolha inválida.');
                 break;
         }
+    startPeriodicChecks();
     }
 }
 

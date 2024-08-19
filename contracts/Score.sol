@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 contract Score {
-
     uint constant alpha = 0.5 * 10**18;
     uint constant maxLoansPerUser = 3;
 
@@ -12,7 +11,7 @@ contract Score {
         uint minInterestRate;
         bool fulfilled;
         bool cancelled;
-        uint requestTime;
+        uint requestTime; // Timestamp do bloco quando o pedido foi feito
     }
 
     struct LoanOffer {
@@ -31,6 +30,7 @@ contract Score {
         bool defaulted; 
         uint amountRepaid;
         uint averageIR; // Average Interest Rate
+        uint dueTime; // Timestamp para monitorar a inadimplência
     }
 
     struct LoanInfo {
@@ -77,6 +77,31 @@ contract Score {
         return total / rates.length;
     }
 
+    function getTimeRemaining(uint loanId, uint expirationTime) public view returns (int) {
+        require(loanRequests[loanId].requestTime > 0, "Loan does not exist");
+        int timeRemaining = int(expirationTime) - int(block.timestamp - loanRequests[loanId].requestTime);
+        return timeRemaining > 0 ? timeRemaining : int(0); // Cast de 0 para int256
+    }
+
+    function checkAndCancelLoan(uint loanId, uint expirationTime) public {
+        require(loanRequests[loanId].fulfilled == false, "Loan already fulfilled");
+        require(loanRequests[loanId].cancelled == false, "Loan already cancelled");
+
+        int timeRemaining = getTimeRemaining(loanId, expirationTime);
+        if (timeRemaining <= 0) {
+            cancelLoanRequest(loanId);
+        }
+    }
+
+    function checkAndMarkDefaulted(uint loanId, uint expirationTime) public {
+        require(activeLoans[loanId].repaid == false, "Loan already repaid");
+        require(activeLoans[loanId].defaulted == false, "Loan already defaulted");
+
+        int timeRemaining = getTimeRemaining(loanId, expirationTime);
+        if (timeRemaining <= 0) {
+            markLoanAsDefaulted(loanId);
+        }
+    }
 
     // Função para solicitar um empréstimo
     function requestLoan(uint amount, uint minInterestRate) public {
@@ -121,15 +146,15 @@ contract Score {
         return count;
     }
 
-
     // Função para oferecer um empréstimo
     function offerLoan(uint requestId, uint interestRate) public payable {
-        require(loanRequests[requestId].amount > 0, "Loan request does not exist");
-        require(!loanRequests[requestId].fulfilled, "Loan request already fulfilled");
-        require(loanRequests[requestId].borrower != msg.sender, "Borrower cannot offer loan on their own request");
-        require(interestRate <= loanRequests[requestId].minInterestRate, "Interest rate too high");
-        require(msg.value == loanRequests[requestId].amount, "Incorrect value sent");
-        require(!loanRequests[requestId].cancelled, "Cannot offer loan on a cancelled request");
+        LoanRequest storage request = loanRequests[requestId];
+        require(request.amount > 0, "Loan request does not exist");
+        require(!request.fulfilled, "Loan request already fulfilled");
+        require(request.borrower != msg.sender, "Borrower cannot offer loan on their own request");
+        require(interestRate <= request.minInterestRate, "Interest rate too high");
+        require(msg.value == request.amount, "Incorrect value sent");
+        require(!request.cancelled, "Cannot offer loan on a cancelled request");
 
         // Verificação adicional para evitar múltiplas ofertas do mesmo usuário
         for (uint i = 0; i < loanOffers[requestId].length; i++) {
@@ -150,8 +175,8 @@ contract Score {
 
     // Função para aceitar a melhor oferta de empréstimo ao chamar manualmente
     function finalizeLoanRequest(uint requestId) public {
-        require(msg.sender == loanRequests[requestId].borrower || msg.sender == address(this), "Only the borrower or the contract can finalize the loan request");
         LoanRequest storage request = loanRequests[requestId];
+        require(msg.sender == request.borrower || msg.sender == address(this), "Only the borrower or the contract can finalize the loan request");
         require(!request.fulfilled, "Loan request already fulfilled");
         require(!request.cancelled, "Cannot finalize a cancelled loan request");
 
@@ -187,7 +212,8 @@ contract Score {
             repaid: false,
             defaulted: false, // Inicializa como não inadimplente
             amountRepaid: 0,
-            averageIR: 0
+            averageIR: 0,
+            dueTime: block.timestamp // Adiciona o timestamp para monitorar a inadimplência
         });
 
         // Transferir o valor do empréstimo do contrato para o tomador após deduzir a taxa
@@ -351,10 +377,7 @@ contract Score {
         return scores[account];
     }
 
-    // Função para adicionar fundos ao fundo de reserva
-    function addToReserveFund() public payable {
-        reserveFund += msg.value;
-    }
+
 
     // Função para obter o valor já pago de um empréstimo
     function getAmountPaid(uint loanId) public view returns (uint) {
@@ -417,7 +440,6 @@ contract Score {
         return pendingRequests;
     }
 
-    // Função para obter detalhes de um pedido de empréstimo
     function getLoanRequestDetails(uint requestId) public view returns (
         address borrower,
         uint amount,
@@ -425,7 +447,8 @@ contract Score {
         uint score,
         uint loanCount,
         uint userDefaultRate,
-        uint averageIR 
+        uint averageIR,
+        int timeRemaining // Adiciona o tempo restante para o cancelamento ou inadimplência
     ) {
         LoanRequest storage request = loanRequests[requestId];
         borrower = request.borrower;
@@ -435,6 +458,19 @@ contract Score {
         loanCount = loanCounts[borrower];
         userDefaultRate = (totalLoans == 0) ? 0 : (defaultedLoans * 100) / totalLoans;
         averageIR = _calculateAverageInterestRate(requestId);
+
+        uint expirationTime = 120; // 2 minutos (120 segundos) de expiração para leilão ou pagamento
+
+        if (request.fulfilled) {
+            // Se o empréstimo foi cumprido, calcular o tempo restante para inadimplência
+            Loan storage loan = activeLoans[requestId];
+            int timeToExpire = int(expirationTime) - int(block.timestamp - loan.dueTime);
+            timeRemaining = timeToExpire > 0 ? timeToExpire : int(0); // Cast de 0 para int256
+        } else {
+            // Se o empréstimo não foi cumprido, calcular o tempo restante para cancelamento
+            int timeToExpire = int(expirationTime) - int(block.timestamp - request.requestTime);
+            timeRemaining = timeToExpire > 0 ? timeToExpire : int(0); // Cast de 0 para int256
+        }
     }
 
     // Função para obter empréstimos de um usuário com status
@@ -474,10 +510,9 @@ contract Score {
         return loans;
     }
 
-    // Função para cancelar um pedido de empréstimo
     function cancelLoanRequest(uint requestId) public {
         LoanRequest storage request = loanRequests[requestId];
-        require(request.borrower == msg.sender, "Only borrower can cancel the loan request");
+        require(request.borrower == msg.sender || msg.sender == address(this), "Only the borrower or the contract can cancel the loan request");
         require(!request.fulfilled, "Loan request already fulfilled");
         require(!request.cancelled, "Loan request already cancelled");
         require(loanOffers[requestId].length == 0, "Loan request already has offers");
@@ -529,10 +564,6 @@ contract Score {
         return loanOffers[requestId];
     }
 
-    // Função para obter o saldo do contrato
-    function getContractBalance() public view returns (uint) {
-        return address(this).balance;
-    }
 
     // Função para obter ofertas de empréstimo feitas por um usuário
     function getOffersByUser(address user) public view returns (LoanInfo[] memory) {

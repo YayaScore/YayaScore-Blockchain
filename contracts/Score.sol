@@ -153,7 +153,6 @@ contract Score {
         require(!request.fulfilled, "Loan request already fulfilled");
         require(request.borrower != msg.sender, "Borrower cannot offer loan on their own request");
         require(interestRate <= request.minInterestRate, "Interest rate too high");
-        require(msg.value == request.amount, "Incorrect value sent");
         require(!request.cancelled, "Cannot offer loan on a cancelled request");
 
         // Verificação adicional para evitar múltiplas ofertas do mesmo usuário

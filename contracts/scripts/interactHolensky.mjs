@@ -5,7 +5,7 @@ import readlineSync from 'readline-sync';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-const conversionRate = BigInt(67920000000000); // 1 BRL in Wei
+const conversionRate = 67920000000000; // 1 BRL in Wei
 
 // Verificação de parâmetros da linha de comando
 const args = process.argv.slice(2);
@@ -31,19 +31,30 @@ const contractABI = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../bu
 const contract = new web3.eth.Contract(contractABI, contractAddress);
 
 let userAddress = '';
+let userPrivateKey = '';
 
 function _convertBRLtoWei(amountInBRL) {
-    return BigInt(amountInBRL) * conversionRate;
+    return amountInBRL * conversionRate;
 }
 
 function _convertWeiToBRL(amountInWei) {
-    return Number(amountInWei) / Number(conversionRate);
+    return Number(amountInWei) / conversionRate;
 }
 
 // Função genérica para estimar e enviar transações
 async function sendTransaction(method, options = {}) {
-    const gas = await method.estimateGas(options);
-    return method.send({ ...options, gas });
+    const tx = {
+        from: userAddress,
+        to: contractAddress,
+        data: method.encodeABI(),
+        gas: await method.estimateGas(options),
+        gasPrice: await web3.eth.getGasPrice()
+    };
+
+    const signedTX = await web3.eth.accounts.signTransaction(tx, userPrivateKey);
+    const receipt = await web3.eth.sendSignedTransaction(signedTX.rawTransaction);
+
+    return receipt;
 }
 
 // Função para obter detalhes de um pedido de empréstimo
@@ -138,7 +149,20 @@ async function markLoanAsDefaulted(loanId) {
 // Função para pagar de volta o empréstimo
 async function repayLoan(loanId, amount) {
     try {
-        await sendTransaction(contract.methods.repayLoan(loanId), { from: userAddress, value: amount });
+        const tx = {
+            from: userAddress,
+            to: contractAddress,
+            gas: await contract.methods.repayLoan(loanId).estimateGas({ from: userAddress, value: amount }),
+            gasPrice: await web3.eth.getGasPrice(),
+            data: contract.methods.repayLoan(loanId).encodeABI(),
+            value: amount
+        }
+
+        const signed = await web3.eth.accounts.signTransaction(tx, userPrivateKey);
+        const receipt = await web3.eth.sendSignedTransaction(signed.rawTransaction);
+//         await sendTransaction(contract.methods.repayLoan(loanId), { from: userAddress, value: amount });
+//        const gas = await contract.methods.repayLoan(loanId).estimateGas({ from: userAddress, value: amount });
+//        await contract.methods.repayLoan(loanId).send({ from: userAddress, value: amount, gas });
         console.log('Empréstimo pago com sucesso.');
     } catch (error) {
         console.error('Erro ao pagar empréstimo:', error);
@@ -211,6 +235,7 @@ async function logIn() {
         case 1:
             const cpf = readlineSync.question("\nCPF: ");
             userAddress = readlineSync.question("Endereço da carteira: ");
+            userPrivateKey = readlineSync.question("Chave privada: ");
             interactive();
             break;
         case 2:
@@ -343,7 +368,7 @@ async function interactive() {
             }
             case 7: {
                 const loans = await getLoansByUser(userAddress);
-                const activeLoans = loans.filter(loan => loan.status === "ativo");
+                const activeLoans = loans.filter(loan => loan.status === "pendente");
 
                 if (activeLoans.length === 0) {
                     console.log('Não há empréstimos ativos para este usuário.');
@@ -366,13 +391,26 @@ async function interactive() {
             case 8: {
                 const loans = await getLoansByUser(userAddress);
                 if (loans.length === 0) {
-                    console.log('Não há empréstimos para este usuário.');
+                    console.log("Não há empréstimos para esse usuário");
+                    break;
                 } else {
-                    loans.forEach((loan, index) => {
-                        console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
-                    });
+                    while (true) { 
+                        loans.forEach((loan, index) => {
+                            console.log(`${index + 1} - Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
+                        });
+                        const choice = readlineSync.questionInt("\nSelecione um empréstimo para visualizar os detalhes ou 0 para voltar: ");
+                        if (choice === 0) {
+                            break;
+                        } else if (choice > 0 && choice <= loans.length) {
+                            const loanId = loans[choice - 1].id;
+                            const details = await contract.methods.getLoanRequestDetails(loanId).call();
+                            displayLoanDetails(details);
+                            console.log("----");
+                        } else {
+                            console.log("Escolha inválida.");
+                        }
+                    }
                 }
-                readlineSync.question('Pressione Enter para voltar para a tela inicial.');
                 break;
             }
             case 9: {

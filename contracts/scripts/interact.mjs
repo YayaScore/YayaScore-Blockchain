@@ -236,7 +236,7 @@ async function getOffersByUser(address) {
 // Menu interativo
 async function interactive() {
     while (true) {
-        console.log(`YaYa Score - Micro empréstimos e Score\n1) Address \n2) Request a Loan \n3) Offer a Loan \n4) Finalize Loan Request \n5) Mark Loan as Defaulted \n6) Repay Loan \n7) Score \n8) Cancel Loan \n9) List Loans by User \n10) See Offers by User \n11) Exit \n`);
+        console.log(`\nYaYa Score - Micro empréstimos e Score\n1) Address \n2) Request a Loan \n3) Offer a Loan \n4) Finalize Loan Request \n5) Mark Loan as Defaulted \n6) Repay Loan \n7) Score \n8) Cancel Loan \n9) List Loans by User \n10) See Offers by User \n11) Exit \n`);
 
         const choice = readlineSync.questionInt('Escolha uma opção: ');
         switch (choice) {
@@ -289,7 +289,6 @@ async function interactive() {
                 const interestRate = readlineSync.questionInt('Digite o valor do juros: ');
                 const amountWei = _convertBRLtoWei(amountBRL);
                 await offerLoan(requestId, interestRate, amountWei);
-                console.log('Oferta de empréstimo feita com sucesso.');
                 break;
             }
             case 4: {
@@ -302,7 +301,7 @@ async function interactive() {
                 loans.forEach((loan, index) => {
                     console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
                 });
-                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para finalizar ou 0 para voltar: ');
+                const loanChoice = readlineSync.questionInt('\nEscolha um empréstimo para finalizar ou 0 para voltar: ');
                 if (loanChoice !== 0) {
                     const loanId = loans[loanChoice - 1].id;
                     await finalizeLoanRequest(loanId);
@@ -323,11 +322,10 @@ async function interactive() {
                     console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
                 });
 
-                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para marcar como inadimplente ou 0 para voltar: ');
+                const loanChoice = readlineSync.questionInt('\nEscolha um empréstimo para marcar como inadimplente ou 0 para voltar: ');
                 if (loanChoice !== 0) {
                     const loanId = activeLoans[loanChoice - 1].id;
                     await markLoanAsDefaulted(loanId);
-                    console.log('Empréstimo marcado como inadimplente com sucesso.');
                 }
                 break;
             }
@@ -345,7 +343,7 @@ async function interactive() {
                     console.log(`${index + 1}) Empréstimo ID: ${loan.id} (Status: ${loan.status})`);
                 });
 
-                const loanChoice = readlineSync.questionInt('Escolha um empréstimo para pagar ou 0 para voltar: ');
+                const loanChoice = readlineSync.questionInt('\nEscolha um empréstimo para pagar ou 0 para voltar: ');
                 if (loanChoice !== 0) {
                     const loanId = activeLoans[loanChoice - 1].id;
                     const amountPaid = await contract.methods.getAmountPaid(loanId).call();
@@ -357,7 +355,6 @@ async function interactive() {
                     const amountToPayBRL = readlineSync.questionFloat('Digite o valor a ser pago: ');
                     const amountToPayWei = _convertBRLtoWei(amountToPayBRL);
                     await repayLoan(loanId, amountToPayWei);
-                    console.log('Empréstimo pago com sucesso.');
                 }
                 break;
             }
@@ -384,7 +381,6 @@ async function interactive() {
                 if (loanChoice !== 0) {
                     const loanId = activeLoans[loanChoice - 1].id;
                     await cancelLoanRequest(loanId);
-                    console.log('Empréstimo cancelado com sucesso.');
                 }
                 break;
             }
